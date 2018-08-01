@@ -13,7 +13,6 @@
 
 import           Web.Spock
 import           Web.Spock.Config
-
 import           Data.Aeson       hiding (json)
 import           Data.Monoid      ((<>))
 import           Data.Text        (Text, pack)
@@ -34,7 +33,6 @@ Fund json
 |]
 
 type Api = SpockM SqlBackend () () ()
-
 type ApiAction a = SpockAction SqlBackend () () a
 
 runSQL :: (HasSpock m, SpockConn m ~ SqlBackend) => SqlPersistT (LoggingT IO) a -> m a
@@ -49,6 +47,11 @@ errorJson code message =
       , "error" .= object ["code" .= code, "message" .= message]
       ]
 
+corsHeader =
+    do ctx <- getContext
+       setHeader "Access-Control-Allow-Origin" "*"
+       pure ctx
+
 
 main :: IO ()
 main = do
@@ -58,19 +61,21 @@ main = do
   runSpock 8080 (spock spockCfg app)
 
 app :: Api
-app = do
-  get "funds" $ do
-    allFunds <- runSQL $ selectList [] [Asc FundId]
-    json allFunds
-  post "funds" $ do
-    maybeFund <- jsonBody :: ApiAction (Maybe Fund)
-    case maybeFund of
-        Nothing -> errorJson 1 "Failed to parse request body as fund"
-        Just theFund -> do
-            newId <- runSQL $ insert theFund
-            json $ object ["result" .= String "success", "id" .= newId]
-  get ("funds" <//> var) $ \fundId -> do
-    maybeFund <- runSQL $ P.get fundId :: ApiAction (Maybe Fund)
-    case maybeFund of
-        Nothing -> errorJson 2 "Could not find fund with id"
-        Just theFund -> json theFund
+app = 
+  prehook corsHeader $
+  do
+    get "funds" $ do
+      allFunds <- runSQL $ selectList [] [Asc FundId]
+      json allFunds
+    post "funds" $ do
+      maybeFund <- jsonBody :: ApiAction (Maybe Fund)
+      case maybeFund of
+          Nothing -> errorJson 1 "Failed to parse request body as fund"
+          Just theFund -> do
+              newId <- runSQL $ insert theFund
+              json $ object ["result" .= String "success", "id" .= newId]
+    get ("funds" <//> var) $ \fundId -> do
+      maybeFund <- runSQL $ P.get fundId :: ApiAction (Maybe Fund)
+      case maybeFund of
+          Nothing -> errorJson 2 "Could not find fund with id"
+          Just theFund -> json theFund
